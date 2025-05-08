@@ -4,6 +4,9 @@ import tkinter as tk
 from tkinter import messagebox
 from datetime import datetime,date
 from tkcalendar import DateEntry
+import os
+import zipfile
+import tempfile
 
 def connect_s3(access_key, secret_key, region):
     return boto3.client(
@@ -171,6 +174,127 @@ def start_list_dest_thread():
     thread = threading.Thread(target=threaded_list_dest_files)
     thread.start()
 
+
+def threaded_download_src_zip():
+    access_key = entry_access_key.get().strip()
+    secret_key = entry_secret_key.get().strip()
+    source_bucket = entry_source_bucket.get().strip()
+
+    if not source_bucket:
+        messagebox.showwarning("Input Error", "Source bucket is required.")
+        return
+
+    start_date = cal_start.get_date()
+    end_date = cal_end.get_date()
+    today = date.today()
+
+    if end_date < start_date:
+        messagebox.showerror("Date Error", "End date cannot be before start date.")
+        return
+
+    if end_date > today:
+        messagebox.showerror("Date Error", "End date cannot exceed today's date.")
+        return
+
+    try:
+        s3_client = connect_s3(access_key, secret_key, 'us-east-1')
+        files = list_objects_recursive(s3_client, source_bucket)
+
+        # Create a temp directory for downloading
+        with tempfile.TemporaryDirectory() as download_dir:
+            matched_files = []
+
+            for file in files:
+                last_modified = file['LastModified'].replace(tzinfo=None)
+                if start_date <= last_modified.date() <= end_date:
+                    key = file['Key']
+                    local_path = os.path.join(download_dir, key.replace('/', '_'))
+                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                    s3_client.download_file(source_bucket, key, local_path)
+                    matched_files.append(local_path)
+                    output_box.after(0, log_to_output, f"⬇️ Downloaded: {key}")
+
+            if not matched_files:
+                messagebox.showinfo("No Files", "No files found in the selected date range.")
+                return
+
+            zip_path = os.path.join(os.getcwd(), f"{source_bucket}_{start_date}_to_{end_date}.zip")
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for file_path in matched_files:
+                    arcname = os.path.basename(file_path)
+                    zipf.write(file_path, arcname)
+
+            output_box.after(0, log_to_output, f"📦 ZIP created: {zip_path}")
+            messagebox.showinfo("Success", f"ZIP file created: {zip_path}")
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+def start_download_src_zip_thread():
+    thread = threading.Thread(target=threaded_download_src_zip)
+    thread.start()
+
+def threaded_download_dest_zip():
+    access_key = entry_access_key.get().strip()
+    secret_key = entry_secret_key.get().strip()
+    dest_bucket = entry_dest_bucket.get().strip()
+
+    if not dest_bucket:
+        messagebox.showwarning("Input Error", "Destination bucket is required.")
+        return
+
+    start_date = cal_start.get_date()
+    end_date = cal_end.get_date()
+    today = date.today()
+
+    if end_date < start_date:
+        messagebox.showerror("Date Error", "End date cannot be before start date.")
+        return
+
+    if end_date > today:
+        messagebox.showerror("Date Error", "End date cannot exceed today's date.")
+        return
+
+    try:
+        s3_client = connect_s3(access_key, secret_key, 'us-east-1')
+        files = list_objects_recursive(s3_client, dest_bucket)
+
+        # Create a temp directory for downloading
+        with tempfile.TemporaryDirectory() as download_dir:
+            matched_files = []
+
+            for file in files:
+                last_modified = file['LastModified'].replace(tzinfo=None)
+                if start_date <= last_modified.date() <= end_date:
+                    key = file['Key']
+                    local_path = os.path.join(download_dir, key.replace('/', '_'))
+                    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                    s3_client.download_file(dest_bucket, key, local_path)
+                    matched_files.append(local_path)
+                    output_box.after(0, log_to_output, f"⬇️ Downloaded: {key}")
+
+            if not matched_files:
+                messagebox.showinfo("No Files", "No files found in the selected date range.")
+                return
+
+            zip_path = os.path.join(os.getcwd(), f"{dest_bucket}_{start_date}_to_{end_date}.zip")
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for file_path in matched_files:
+                    arcname = os.path.basename(file_path)
+                    zipf.write(file_path, arcname)
+
+            output_box.after(0, log_to_output, f"📦 ZIP created: {zip_path}")
+            messagebox.showinfo("Success", f"ZIP file created: {zip_path}")
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+def start_download_dest_zip_thread():
+    thread = threading.Thread(target=threaded_download_dest_zip)
+    thread.start()
+
+
+
 # GUI setup
 window = tk.Tk()
 window.title("S3 Bucket Tool with Date Filters")
@@ -191,7 +315,11 @@ cal_end = DateEntry(window, width=20, background='darkblue', foreground='white',
 button_copy = tk.Button(window, text="📁 Copy Files", command=start_copy_thread)
 button_list_source = tk.Button(window, text="📄 List Source Files (by date)", command=start_list_thread)
 button_list_dest = tk.Button(window, text="📄 List Destination Files (by original date)", command=start_list_dest_thread)
+button_download_src_zip = tk.Button(window, text="📦 Download ZIP (Source Files by Date)", command=start_download_src_zip_thread)
+button_download_dest_zip = tk.Button(window, text="📦 Download ZIP (Destination Files by Date)", command=start_download_dest_zip_thread)
 output_box = tk.Text(window, height=20, width=80)
+
+
 
 label_access_key.pack()
 entry_access_key.pack()
@@ -208,6 +336,8 @@ cal_end.pack()
 button_copy.pack(pady=5) #pady=5
 button_list_source.pack(pady=5) #pady=5
 button_list_dest.pack(pady=5) #pady=5
+button_download_src_zip.pack(pady=5)
+button_download_dest_zip.pack(pady=5)
 output_box.pack()
 
 def main():
