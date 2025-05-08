@@ -210,4 +210,8 @@ button_list_source.pack(pady=5) #pady=5
 button_list_dest.pack(pady=5) #pady=5
 output_box.pack()
 
-window.mainloop()
+def main():
+    window.mainloop()
+
+if __name__ == "__main__":
+    main()
